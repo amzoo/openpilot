@@ -101,8 +101,7 @@ struct ModelManagerSP @0xaedffd8f31e7b55d {
 
 struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   dec @0 :DynamicExperimentalControl;
-  visionTurnSpeedControl @4 :VisionTurnSpeedControl;
-  accelPersonality @3 :AccelerationPersonality;
+  visionTurnSpeedControl @3 :VisionTurnSpeedControl;
 
   events @1 :List(OnroadEventSP.Event);
   slc @2 :SpeedLimitControl;
@@ -130,13 +129,6 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       turning @2; # Actively turning. Managing acceleration to provide a roll on turn feeling.
       leaving @3; # Road ahead straightens. Start to allow positive acceleration.
     }
-  }
-  
-  enum AccelerationPersonality {
-    sport @0;
-    normal @1;
-    eco @2;
-    stock @3;
   }
 
   struct SpeedLimitControl {

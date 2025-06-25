@@ -5,7 +5,7 @@ import signal
 import sys
 import traceback
 
-from cereal import log, custom
+from cereal import log
 import cereal.messaging as messaging
 import openpilot.system.sentry as sentry
 from openpilot.common.params import Params, ParamKeyType
@@ -49,6 +49,9 @@ def manager_init() -> None:
     ("BlindSpot", "0"),
     ("BlinkerMinLateralControlSpeed", "20"),  # MPH or km/h
     ("BlinkerPauseLateralControl", "0"),
+    ("CustomAccIncrementsEnabled", "0"),
+    ("CustomAccLongPressIncrement", "5"),
+    ("CustomAccShortPressIncrement", "1"),
     ("DeviceBootMode", "0"),
     ("DynamicExperimentalControl", "0"),
     ("HyundaiLongitudinalTuning", "0"),
@@ -64,7 +67,7 @@ def manager_init() -> None:
     ("ModelManager_ModelsCache", ""),
     ("NeuralNetworkLateralControl", "0"),
     ("QuietMode", "0"),
-    ("VisionTurnSpeedControl", "1"),
+    ("VisionTurnSpeedControl", "0"),
 
     ("SpeedLimitControl", "0"),
     ("SpeedLimitControlPolicy", "3"),
@@ -77,9 +80,6 @@ def manager_init() -> None:
     ("ToyotaAutoHold", "0"),
     ("ToyotaEnhancedBsm", "0"),
     ("ToyotaTSS2Long", "0"),
-    ("AccelPersonality", str(custom.LongitudinalPlanSP.AccelerationPersonality.stock)),
-    ("ToyotaDriveMode", "0"),
-    ("DynamicPersonality", "0"),
   ]
 
   # device boot mode

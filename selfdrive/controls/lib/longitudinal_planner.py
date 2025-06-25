@@ -76,12 +76,13 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.param_read_counter = 0
     self.read_param()
 
-    self.dynamic_personality = False
+    #self.dynamic_personality = False
 
 
   def read_param(self):
     try:
-      self.dynamic_personality = self.params.get_bool("DynamicPersonality")
+      pass
+      #self.dynamic_personality = self.params.get_bool("DynamicPersonality")
     except AttributeError:
       pass
 
@@ -134,10 +135,10 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     prev_accel_constraint = not (reset_state or sm['carState'].standstill)
 
     if self.mode == 'acc':
-      if self.accel_controller.is_personality_enabled:
-        max_limit = self.accel_controller._get_max_accel_for_speed(v_ego)
-        #min_limit = self.accel_controller._get_min_accel_for_speed(v_ego)
-        accel_clip = [ACCEL_MIN, max_limit]
+      if self.vibe_controller.is_personality_enabled:
+        # Only get max acceleration from vibe controller, use default ACCEL_MIN for minimum
+        max_accel = self.vibe_controller.get_max_accel(v_ego)
+        accel_clip = [ACCEL_MIN, max_accel]
         print(f"accel_clip: {accel_clip}")
         # Recalculate limit turn according to the new max limit
         steer_angle_without_offset = sm['carState'].steeringAngleDeg - sm['liveParameters'].angleOffsetDeg
@@ -175,7 +176,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, x, v, a, j, personality=sm['selfdriveState'].personality, dynamic_personality = self.dynamic_personality)
+    self.mpc.update(sm['radarState'], v_cruise, x, v, a, j, personality=sm['selfdriveState'].personality)#, dynamic_personality = self.dynamic_personality)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
