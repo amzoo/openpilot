@@ -14,6 +14,7 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets import Widget
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.lane_change_settings import LaneChangeSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.mads_settings import MadsSettingsLayout
+from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.pid_settings import PidSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.torque_settings import TorqueSettingsLayout
 
 
@@ -22,6 +23,7 @@ class PanelType(IntEnum):
   MADS = 1
   LANE_CHANGE = 2
   TORQUE_CONTROL = 3
+  PID_CONTROL = 4
 
 
 class SteeringLayout(Widget):
@@ -32,6 +34,7 @@ class SteeringLayout(Widget):
     self._lane_change_settings_layout = LaneChangeSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
     self._mads_settings_layout = MadsSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
     self._torque_control_layout = TorqueSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
+    self._pid_control_layout = PidSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
 
     items = self._initialize_items()
     self._scroller = Scroller(items, line_separator=False, spacing=0)
@@ -90,6 +93,11 @@ class SteeringLayout(Widget):
       button_width=250,
       callback=self._on_lateral_control_changed,
     )
+    self._pid_customization_button = simple_button_item_sp(
+      button_text=lambda: tr("Customize PID Params"),
+      button_width=850,
+      callback=lambda: self._set_current_panel(PanelType.PID_CONTROL)
+    )
     self._torque_customization_button = simple_button_item_sp(
       button_text=lambda: tr("Customize Torque Params"),
       button_width=850,
@@ -112,6 +120,7 @@ class SteeringLayout(Widget):
       self._blinker_reengage_delay,
       LineSeparatorSP(40),
       self._lateral_control_method,
+      self._pid_customization_button,
       self._torque_customization_button,
       LineSeparatorSP(40),
       self._nnlc_toggle,
@@ -154,6 +163,7 @@ class SteeringLayout(Widget):
     enforce_pid_enabled = lateral_method == 1
     self._lateral_control_method.action_item.set_enabled(ui_state.is_offroad() and torque_allowed)
     self._nnlc_toggle.action_item.set_enabled(ui_state.is_offroad() and torque_allowed and not enforce_torque_enabled and not enforce_pid_enabled)
+    self._pid_customization_button.action_item.set_enabled(enforce_pid_enabled)
     self._torque_customization_button.action_item.set_enabled(enforce_torque_enabled)
 
   def _render(self, rect):
@@ -163,6 +173,8 @@ class SteeringLayout(Widget):
       self._mads_settings_layout.render(rect)
     elif self._current_panel == PanelType.TORQUE_CONTROL:
       self._torque_control_layout.render(rect)
+    elif self._current_panel == PanelType.PID_CONTROL:
+      self._pid_control_layout.render(rect)
     else:
       self._scroller.render(rect)
 
