@@ -10,11 +10,16 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
 
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 # Step 1: Physics-informed feedforward improvements
 UNDERSTEER_GRADIENT = 0.003      # vehicle understeer gradient rad/(m/s²), RAV4 Prime estimate
 EPS_ASSIST_V_EGO = [5.0, 15.0, 25.0, 35.0]  # m/s: EPS assist compensation breakpoints
 EPS_ASSIST_GAIN  = [0.7, 0.85, 1.0, 1.15]   # unitless: higher at speed (less EPS assist)
+
+# Step 2: Preview-based feedforward
+PREVIEW_WEIGHT = 0.3   # fraction of feedforward from preview lateral accel (0=off, 1=full preview)
+PREVIEW_ALPHA  = 0.15  # low-pass filter coefficient per 100 Hz cycle (~0.67s time constant)
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -54,6 +59,7 @@ class LatControlTorque(LatControl):
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
 
     self.extension = LatControlTorqueExt(self, CP, CP_SP, CI)
+    self.preview_lat_accel_filtered = 0.0
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     self.torque_params.latAccelFactor = latAccelFactor
@@ -89,10 +95,24 @@ class LatControlTorque(LatControl):
     lookahead_idx = int(np.clip(-delay_frames + self.lookahead_frames, -self.lat_accel_request_buffer_len+1, -2))
     raw_lateral_jerk = (self.lat_accel_request_buffer[lookahead_idx+1] - self.lat_accel_request_buffer[lookahead_idx-1]) / (2 * self.dt)
     desired_lateral_jerk = self.jerk_filter.update(raw_lateral_jerk)
-    gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation
-    ff = gravity_adjusted_future_lateral_accel
+    # Preview control: blend current and future lat-accel for feedforward only (feedback error unchanged)
+    ff_lat_accel = future_desired_lateral_accel
+    if self.extension.model_valid and CS.vEgo > 3.0:
+      preview_time = float(np.interp(CS.vEgo, [5.0, 15.0, 30.0], [0.5, 1.0, 2.0]))
+      preview_raw = float(np.interp(preview_time, ModelConstants.T_IDXS, self.extension.model_v2.acceleration.y))
+      self.preview_lat_accel_filtered = PREVIEW_ALPHA * preview_raw + (1 - PREVIEW_ALPHA) * self.preview_lat_accel_filtered
+      # Only apply preview when it agrees in sign with the current request (suppresses on straights/reversals)
+      if abs(future_desired_lateral_accel) > 0.05 and preview_raw * future_desired_lateral_accel > 0:
+        ff_lat_accel = (1 - PREVIEW_WEIGHT) * future_desired_lateral_accel + PREVIEW_WEIGHT * self.preview_lat_accel_filtered
+      else:
+        self.preview_lat_accel_filtered = future_desired_lateral_accel
+    else:
+      self.preview_lat_accel_filtered = future_desired_lateral_accel
+
+    gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation  # original, for extension/logging
+    ff = ff_lat_accel - roll_compensation  # preview-blended, for feedforward
     # Understeer gradient correction: compensates for growing sideslip at speed on curves
-    ff += UNDERSTEER_GRADIENT * future_desired_lateral_accel * CS.vEgo
+    ff += UNDERSTEER_GRADIENT * ff_lat_accel * CS.vEgo
     # Speed-dependent EPS assist compensation: more torque needed per unit lat-accel at highway speeds
     ff *= float(np.interp(CS.vEgo, EPS_ASSIST_V_EGO, EPS_ASSIST_GAIN))
     # latAccelOffset corrects roll compensation bias from device roll misalignment relative to car roll
