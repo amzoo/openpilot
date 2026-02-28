@@ -39,16 +39,13 @@ class ControlsExt(ModelStateBase):
     lateral_control_method = int(self.params.get("LateralControlMethod") or 0)
 
     if lateral_control_method == 1:  # PID
-      kp = float(self.params.get("PidKpV") or 0.6)
-      ki = float(self.params.get("PidKiV") or 0.1)
-      kf = float(self.params.get("PidKf") or 0.00007818594)
       cp_pid = self.CP.as_builder()
       cp_pid.lateralTuning.init('pid')
       cp_pid.lateralTuning.pid.kpBP = [0.0]
-      cp_pid.lateralTuning.pid.kpV = [kp]
+      cp_pid.lateralTuning.pid.kpV = [0.6]
       cp_pid.lateralTuning.pid.kiBP = [0.0]
-      cp_pid.lateralTuning.pid.kiV = [ki]
-      cp_pid.lateralTuning.pid.kf = kf
+      cp_pid.lateralTuning.pid.kiV = [0.1]
+      cp_pid.lateralTuning.pid.kf = 0.00007818594
       return LatControlPID(cp_pid.as_reader(), self.CP_SP, CI, dt)
     elif lateral_control_method == 2:  # Torque
       torque_versions = self.params.get("TorqueControlTune")
