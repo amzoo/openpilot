@@ -8,12 +8,15 @@ import pyray as rl
 
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.blind_spot_indicators import BlindSpotIndicators
+from openpilot.selfdrive.ui.sunnypilot.onroad.rocket_fuel import RocketFuel
+from openpilot.selfdrive.ui.ui_state import ui_state
 
 
 class HudRendererSP(HudRenderer):
   def __init__(self):
     super().__init__()
     self.blind_spot_indicators = BlindSpotIndicators()
+    self.rocket_fuel = RocketFuel(scale=1.0)
 
   def _update_state(self) -> None:
     super()._update_state()
@@ -22,6 +25,7 @@ class HudRendererSP(HudRenderer):
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
     self.blind_spot_indicators.render(rect)
+    self.rocket_fuel.render(rect, ui_state.sm)
 
   def _has_blind_spot_detected(self) -> bool:
 
