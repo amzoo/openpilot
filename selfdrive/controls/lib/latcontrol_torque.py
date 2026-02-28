@@ -3,7 +3,6 @@ import numpy as np
 from collections import deque
 
 from cereal import log
-from opendbc.car.lateral import FRICTION_THRESHOLD, get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
@@ -20,6 +19,10 @@ EPS_ASSIST_GAIN  = [0.7, 0.85, 1.0, 1.15]   # unitless: higher at speed (less EP
 # Step 2: Preview-based feedforward
 PREVIEW_WEIGHT = 0.3   # fraction of feedforward from preview lateral accel (0=off, 1=full preview)
 PREVIEW_ALPHA  = 0.15  # low-pass filter coefficient per 100 Hz cycle (~0.67s time constant)
+
+# Step 3: Smooth friction compensation
+FRICTION_SMOOTH_EPSILON = 0.05   # rad/s: tanh smoothing width (avoids sign discontinuity at zero-crossing)
+FRICTION_VISCOUS        = 0.001  # (lat-accel·s/rad): viscous friction coefficient
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -117,7 +120,13 @@ class LatControlTorque(LatControl):
     ff *= float(np.interp(CS.vEgo, EPS_ASSIST_V_EGO, EPS_ASSIST_GAIN))
     # latAccelOffset corrects roll compensation bias from device roll misalignment relative to car roll
     ff -= self.torque_params.latAccelOffset
-    ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
+    # Smooth friction model: uses actual steering rate rather than error proxy
+    # tanh avoids the sign() discontinuity at zero-crossings; viscous term damps oscillation
+    steer_rate_rads = math.radians(CS.steeringRateDeg)
+    coulomb_friction = self.torque_params.friction * self.torque_params.latAccelFactor * math.tanh(steer_rate_rads / FRICTION_SMOOTH_EPSILON)
+    viscous_friction = FRICTION_VISCOUS * steer_rate_rads
+    friction_speed_scale = float(np.interp(CS.vEgo, [5.0, 15.0, 30.0], [0.6, 0.85, 1.0]))
+    ff += (coulomb_friction + viscous_friction) * friction_speed_scale
 
     if not active:
       output_torque = 0.0
