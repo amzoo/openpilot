@@ -24,6 +24,9 @@ PREVIEW_ALPHA  = 0.15  # low-pass filter coefficient per 100 Hz cycle (~0.67s ti
 FRICTION_SMOOTH_EPSILON = 0.05   # rad/s: tanh smoothing width (avoids sign discontinuity at zero-crossing)
 FRICTION_VISCOUS        = 0.001  # (lat-accel·s/rad): viscous friction coefficient
 
+# Feedforward clamp: reserve headroom for PI feedback
+FF_CLAMP = 0.85  # max normalized feedforward (leaves 15% of authority for PI correction)
+
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
 # torque applied to the steering rack. It does not correlate to
@@ -127,6 +130,9 @@ class LatControlTorque(LatControl):
     viscous_friction = FRICTION_VISCOUS * steer_rate_rads
     friction_speed_scale = float(np.interp(CS.vEgo, [5.0, 15.0, 30.0], [0.6, 0.85, 1.0]))
     ff += (coulomb_friction + viscous_friction) * friction_speed_scale
+
+    # Clamp feedforward to leave headroom for PI feedback
+    ff = float(np.clip(ff, -FF_CLAMP, FF_CLAMP))
 
     if not active:
       output_torque = 0.0
