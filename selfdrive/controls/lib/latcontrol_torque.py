@@ -11,6 +11,11 @@ from openpilot.common.pid import PIDController
 
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
 
+# Step 1: Physics-informed feedforward improvements
+UNDERSTEER_GRADIENT = 0.003      # vehicle understeer gradient rad/(m/s²), RAV4 Prime estimate
+EPS_ASSIST_V_EGO = [5.0, 15.0, 25.0, 35.0]  # m/s: EPS assist compensation breakpoints
+EPS_ASSIST_GAIN  = [0.7, 0.85, 1.0, 1.15]   # unitless: higher at speed (less EPS assist)
+
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
 # torque applied to the steering rack. It does not correlate to
@@ -72,7 +77,7 @@ class LatControlTorque(LatControl):
     future_desired_lateral_accel = desired_curvature * CS.vEgo ** 2
     self.lat_accel_request_buffer.append(future_desired_lateral_accel)
 
-    roll_compensation = params.roll * ACCELERATION_DUE_TO_GRAVITY
+    roll_compensation = math.sin(params.roll) * ACCELERATION_DUE_TO_GRAVITY
     curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg), CS.vEgo, 0.0))
     lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
@@ -86,6 +91,10 @@ class LatControlTorque(LatControl):
     desired_lateral_jerk = self.jerk_filter.update(raw_lateral_jerk)
     gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation
     ff = gravity_adjusted_future_lateral_accel
+    # Understeer gradient correction: compensates for growing sideslip at speed on curves
+    ff += UNDERSTEER_GRADIENT * future_desired_lateral_accel * CS.vEgo
+    # Speed-dependent EPS assist compensation: more torque needed per unit lat-accel at highway speeds
+    ff *= float(np.interp(CS.vEgo, EPS_ASSIST_V_EGO, EPS_ASSIST_GAIN))
     # latAccelOffset corrects roll compensation bias from device roll misalignment relative to car roll
     ff -= self.torque_params.latAccelOffset
     ff += get_friction(error + JERK_GAIN * desired_lateral_jerk, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
