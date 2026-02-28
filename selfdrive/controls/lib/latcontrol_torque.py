@@ -27,6 +27,14 @@ FRICTION_VISCOUS        = 0.001  # (lat-accel·s/rad): viscous friction coeffici
 # Feedforward clamp: reserve headroom for PI feedback
 FF_CLAMP = 0.85  # max normalized feedforward (leaves 15% of authority for PI correction)
 
+# Stiction (static friction breakaway) compensation
+STICTION_MULTIPLIER     = 1.3    # stiction coefficient = coulomb × this (stiction > kinetic friction)
+STICTION_THRESHOLD_RADS = math.radians(0.5)  # rad/s: below this rate, steering is considered stationary
+
+# Backlash (worm gear dead zone) compensation
+BACKLASH_WIDTH_DEG  = 0.2   # degrees: dead zone width — measure empirically, set 0 if not observed
+BACKLASH_TORQUE     = 0.02  # normalized torque boost to push through backlash dead zone
+
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
 # torque applied to the steering rack. It does not correlate to
@@ -66,6 +74,9 @@ class LatControlTorque(LatControl):
 
     self.extension = LatControlTorqueExt(self, CP, CP_SP, CI)
     self.preview_lat_accel_filtered = 0.0
+    self.prev_steer_rate_rads = 0.0
+    self.backlash_in_deadzone = False
+    self.backlash_ref_angle_deg = 0.0
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     self.torque_params.latAccelFactor = latAccelFactor
@@ -128,8 +139,24 @@ class LatControlTorque(LatControl):
     steer_rate_rads = math.radians(CS.steeringRateDeg)
     coulomb_friction = self.torque_params.friction * self.torque_params.latAccelFactor * math.tanh(steer_rate_rads / FRICTION_SMOOTH_EPSILON)
     viscous_friction = FRICTION_VISCOUS * steer_rate_rads
+    # Stiction: extra breakaway torque when steering is nearly stationary and needs to overcome static friction
+    stiction_extra = 0.0
+    if abs(steer_rate_rads) < STICTION_THRESHOLD_RADS and abs(ff_lat_accel) > 0.05:
+      stiction_extra = STICTION_MULTIPLIER * self.torque_params.friction * self.torque_params.latAccelFactor * math.copysign(1.0, ff_lat_accel)
+    # Backlash: compensate for worm gear dead zone on direction reversals
+    backlash_extra = 0.0
+    direction_reversed = (steer_rate_rads * self.prev_steer_rate_rads < 0) and (abs(self.prev_steer_rate_rads) > math.radians(0.3))
+    if direction_reversed:
+      self.backlash_in_deadzone = True
+      self.backlash_ref_angle_deg = CS.steeringAngleDeg
+    if self.backlash_in_deadzone:
+      if abs(CS.steeringAngleDeg - self.backlash_ref_angle_deg) >= BACKLASH_WIDTH_DEG:
+        self.backlash_in_deadzone = False
+      elif abs(ff_lat_accel) > 0.05:
+        backlash_extra = BACKLASH_TORQUE * math.copysign(1.0, ff_lat_accel)
+    self.prev_steer_rate_rads = steer_rate_rads
     friction_speed_scale = float(np.interp(CS.vEgo, [5.0, 15.0, 30.0], [0.6, 0.85, 1.0]))
-    ff += (coulomb_friction + viscous_friction) * friction_speed_scale
+    ff += (coulomb_friction + viscous_friction + stiction_extra + backlash_extra) * friction_speed_scale
 
     # Clamp feedforward to leave headroom for PI feedback
     ff = float(np.clip(ff, -FF_CLAMP, FF_CLAMP))
