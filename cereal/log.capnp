@@ -922,6 +922,10 @@ struct ControlsState @0x97ff69c53601abf1 {
     desiredLateralAccel @10 :Float32;
     desiredLateralJerk @11 :Float32;
     version @12 :Int32;
+    feedforwardOutput @13 :Float32;     # final ff value sent to PID (after all corrections + clamp)
+    previewLateralAccel @14 :Float32;   # preview-blended ff_lat_accel (vs current desired)
+    frictionCompensation @15 :Float32;  # total friction term (coulomb + viscous + stiction + backlash)
+    epsAssistFactor @16 :Float32;       # speed-dependent EPS assist gain applied to feedforward
    }
 
   struct LateralLQRState {

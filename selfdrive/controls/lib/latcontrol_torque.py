@@ -131,7 +131,8 @@ class LatControlTorque(LatControl):
     # Understeer gradient correction: compensates for growing sideslip at speed on curves
     ff += UNDERSTEER_GRADIENT * ff_lat_accel * CS.vEgo
     # Speed-dependent EPS assist compensation: more torque needed per unit lat-accel at highway speeds
-    ff *= float(np.interp(CS.vEgo, EPS_ASSIST_V_EGO, EPS_ASSIST_GAIN))
+    eps_assist_factor = float(np.interp(CS.vEgo, EPS_ASSIST_V_EGO, EPS_ASSIST_GAIN))
+    ff *= eps_assist_factor
     # latAccelOffset corrects roll compensation bias from device roll misalignment relative to car roll
     ff -= self.torque_params.latAccelOffset
     # Smooth friction model: uses actual steering rate rather than error proxy
@@ -156,7 +157,8 @@ class LatControlTorque(LatControl):
         backlash_extra = BACKLASH_TORQUE * math.copysign(1.0, ff_lat_accel)
     self.prev_steer_rate_rads = steer_rate_rads
     friction_speed_scale = float(np.interp(CS.vEgo, [5.0, 15.0, 30.0], [0.6, 0.85, 1.0]))
-    ff += (coulomb_friction + viscous_friction + stiction_extra + backlash_extra) * friction_speed_scale
+    friction_total = (coulomb_friction + viscous_friction + stiction_extra + backlash_extra) * friction_speed_scale
+    ff += friction_total
 
     # Clamp feedforward to leave headroom for PI feedback
     ff = float(np.clip(ff, -FF_CLAMP, FF_CLAMP))
@@ -188,6 +190,10 @@ class LatControlTorque(LatControl):
       pid_log.desiredLateralAccel = float(setpoint)
       pid_log.desiredLateralJerk = float(desired_lateral_jerk)
       pid_log.saturated = bool(self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited_by_safety, curvature_limited))
+      pid_log.feedforwardOutput = float(ff)
+      pid_log.previewLateralAccel = float(ff_lat_accel)
+      pid_log.frictionCompensation = float(friction_total)
+      pid_log.epsAssistFactor = float(eps_assist_factor)
 
     # TODO left is positive in this convention
     return -output_torque, 0.0, pid_log
