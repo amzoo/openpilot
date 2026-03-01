@@ -75,6 +75,39 @@ Green fills upward (positive acceleration), red fills downward (braking):
 Worktree-based isolation: creates a fresh checkout of any UI branch, injects the clip tools
 from `clip-tools`, renders the clip, and opens it. The current working tree is never touched.
 
+### Fix: ipc_pyx.so error in worktree (`test-clip.sh`)
+Git worktrees check out files but do not initialize submodules, so `msgq_repo/` in the
+worktree is an empty directory. The `msgq -> msgq_repo/msgq` symlink is broken, and
+`from msgq.visionipc import VisionIpcServer` fails with a missing `ipc_pyx.so` error when
+`uv run` uses the worktree's Python environment.
+
+Fix: instead of `cd $WORKTREE && uv run python3 ...`, use the main repo's pre-built venv
+with the worktree prepended to `PYTHONPATH`:
+```bash
+PYTHONPATH="$WORKTREE" "$REPO_ROOT/.venv/bin/python3" "$WORKTREE/tools/clip/run.py" "$@" -o "$OUT"
+```
+- `PYTHONPATH=$WORKTREE` is checked first → `openpilot.*` imports find the UI branch's files ✓
+- Broken symlinks in the worktree (msgq, cereal, opendbc, …) cause Python's `isdir` to return
+  False → Python skips them and falls through to the next sys.path entry ✓
+- The main repo's `.pth` (loaded by `$REPO_ROOT/.venv`) adds `REPO_ROOT` → `msgq` and other
+  submodule symlinks resolve correctly with compiled `.so` files ✓
+
+---
+
+## Machine Setup (one-time per machine)
+
+After cloning and running `uv sync`, compile the msgq Cython extensions:
+```bash
+scons -j$(sysctl -n hw.ncpu)   # full build (includes msgq)
+# or just msgq:
+cd msgq_repo && scons -j$(sysctl -n hw.ncpu) && cd ..
+```
+The compiled files land at `msgq_repo/msgq/ipc_pyx.so` and
+`msgq_repo/msgq/visionipc/visionipc_pyx.so`. This step is **not** handled by `uv sync`.
+
+`test-clip.sh` uses the main repo's compiled venv (via `PYTHONPATH`), so you only need to
+build once on each machine — not per worktree.
+
 ---
 
 ## Usage

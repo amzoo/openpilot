@@ -51,10 +51,13 @@ echo "Injecting clip tools..."
 cp "$SCRIPT_DIR/run.py" "$WORKTREE/tools/clip/run.py"
 cp "$SCRIPT_DIR/find_rocket_fuel.py" "$WORKTREE/tools/clip/find_rocket_fuel.py"
 
-# Run clip tool from the worktree
+# Run clip tool: use main repo's venv + PYTHONPATH pointing to the worktree.
+# PYTHONPATH=$WORKTREE shadows openpilot.* imports with the UI branch's files.
+# Broken submodule symlinks in the worktree (msgq, cereal, etc.) are skipped by
+# Python's isdir check, so they fall through to the main repo where .so files
+# are compiled. No submodule init or uv sync needed in the worktree.
 echo "Rendering clip to $OUT..."
-cd "$WORKTREE"
-uv run python3 tools/clip/run.py "$@" -o "$OUT"
+PYTHONPATH="$WORKTREE" "$REPO_ROOT/.venv/bin/python3" "$WORKTREE/tools/clip/run.py" "$@" -o "$OUT"
 
 echo "Done: $OUT"
 open "$OUT" 2>/dev/null || echo "(open not available — file at $OUT)"
