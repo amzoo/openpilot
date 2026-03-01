@@ -28,9 +28,9 @@ BRANCH_SAFE="${BRANCH//\//-}"
 OUT="/tmp/clip_test_${BRANCH_SAFE}_$$.mp4"
 WORKTREE="/tmp/clip_worktree_${BRANCH_SAFE}_$$"
 
-# Default: demo route with --best-rf when no additional args given
+# Default: demo route when no additional args given
 if [[ $# -eq 0 ]]; then
-  set -- --demo --best-rf
+  set -- --demo --no-metadata
 fi
 
 # Cleanup on exit
@@ -57,21 +57,23 @@ cp "$SCRIPT_DIR/find_rocket_fuel.py" "$WORKTREE/tools/clip/find_rocket_fuel.py"
 rm -rf "$WORKTREE/cereal"
 ln -s "$REPO_ROOT/cereal" "$WORKTREE/cereal"
 
-# Symlink compiled .so files from the main repo into the worktree's openpilot
-# package. The worktree has no compiled extensions (scons was not run there),
-# so Python would fail to import openpilot.common.params_pyx and friends.
+# Symlink build artifacts from the main repo into the worktree's openpilot
+# package. The worktree has no compiled extensions (scons was not run there)
+# and no generated .fnt font atlases (raylib generates these at build time).
 # Use Python glob because macOS find doesn't traverse this directory reliably.
 REPO_ROOT="$REPO_ROOT" WORKTREE="$WORKTREE" \
   "$REPO_ROOT/.venv/bin/python3" -c "
 import glob, os
 repo_op = os.environ['REPO_ROOT'] + '/openpilot'
 wt_op   = os.environ['WORKTREE']  + '/openpilot'
-for so in glob.glob(repo_op + '/**/*.so', recursive=True):
-    rel = os.path.relpath(so, repo_op)
+for f in glob.glob(repo_op + '/**/*.so',  recursive=True) + \
+         glob.glob(repo_op + '/**/*.fnt', recursive=True) + \
+         glob.glob(repo_op + '/**/*.png', recursive=True):
+    rel = os.path.relpath(f, repo_op)
     dst = os.path.join(wt_op, rel)
     if not os.path.exists(dst):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        os.symlink(so, dst)
+        os.symlink(f, dst)
 "
 
 # Run clip tool: use main repo's venv + PYTHONPATH pointing to the worktree.
