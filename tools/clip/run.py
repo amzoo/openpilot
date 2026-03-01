@@ -41,11 +41,19 @@ def parse_args():
   parser.add_argument("-x", "--speed", type=int, default=1, help="Speed multiplier")
   parser.add_argument("--demo", action="store_true", help="Use demo route with default timing")
   parser.add_argument("--big", action="store_true", help="Use big UI (2160x1080)")
+  parser.add_argument("--stacked", action="store_true", help="Render c4 and c3x sizes and stack vertically (c3x top, c4 bottom)")
   parser.add_argument("--qcam", action="store_true", help="Use qcamera instead of fcamera")
   parser.add_argument("--windowed", action="store_true", help="Show window")
   parser.add_argument("--no-metadata", action="store_true", help="Disable metadata overlay")
   parser.add_argument("--no-time-overlay", action="store_true", help="Disable time overlay")
+  parser.add_argument("--best-rf", action="store_true",
+                      help="Find and clip the best RocketFuel window in the route")
+  parser.add_argument("--rf-window", type=int, default=15,
+                      help="Window size in seconds for --best-rf (default: 15)")
   args = parser.parse_args()
+
+  if args.stacked and args.big:
+    parser.error("--stacked and --big are mutually exclusive")
 
   if args.demo:
     args.route, args.start, args.end = args.route or DEMO_ROUTE, args.start or DEMO_START, args.end or DEMO_END
@@ -56,9 +64,9 @@ def parse_args():
     parts = args.route.split('/')
     args.route, args.start, args.end = '/'.join(parts[:2]), args.start or int(parts[2]), args.end or int(parts[3])
 
-  if args.start is None or args.end is None:
-    parser.error("--start and --end are required")
-  if args.end <= args.start:
+  if not args.best_rf and (args.start is None or args.end is None):
+    parser.error("--start and --end are required (or use --best-rf)")
+  if args.start is not None and args.end is not None and args.end <= args.start:
     parser.error(f"end ({args.end}) must be greater than start ({args.start})")
   return args
 
@@ -279,7 +287,8 @@ def render_overlays(gui_app, font, big, metadata, title, start_time, frame_idx, 
 
 
 def clip(route: Route, output: str, start: int, end: int, headless: bool = True, big: bool = False,
-         title: str | None = None, show_metadata: bool = True, show_time: bool = True, use_qcam: bool = False):
+         title: str | None = None, show_metadata: bool = True, show_time: bool = True, use_qcam: bool = False,
+         rf_state: tuple[float, float] | None = None):
   timer, duration = Timer(), end - start
 
   import pyray as rl
@@ -314,11 +323,34 @@ def clip(route: Route, output: str, start: int, end: int, headless: bool = True,
     vipc.create_buffers(VisionStreamType.VISION_STREAM_ROAD, 4, frame_queue.frame_w, frame_queue.frame_h)
     vipc.start_listener()
 
+    # Pre-warm ui_state with frames before the clip window so that
+    # pandaStates/deviceState/selfdriveState are already established when rendering starts.
+    if frame_start > 0:
+      patch_submaster(all_chunks[:frame_start], ui_state)
+      for _ in range(frame_start):
+        ui_state.update()
+      ui_state.sm.frame = 0
+
     patch_submaster(message_chunks, ui_state)
+    ui_state.params.put_bool("TorqueBar", True)
+    ui_state.params.put_bool("RocketFuel", True)
     gui_app.init_window("clip", fps=FRAMERATE)
 
     road_view = AugmentedRoadView()
     road_view.set_rect(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
+
+    # Pre-warm RocketFuel's filter state to match clip start
+    if hasattr(road_view._hud_renderer, 'rocket_fuel'):
+      rf = road_view._hud_renderer.rocket_fuel
+      if rf_state is not None:
+        rf._accel_filter.x, rf._alpha_filter.x = rf_state
+      elif frame_start > 0:
+        for chunk in all_chunks[:frame_start]:
+          if "carState" in chunk:
+            a_ego = float(chunk["carState"].as_builder().carState.aEgo)
+            accel_norm = max(-1.0, min(1.0, a_ego / 4.0))
+            rf._accel_filter.update(accel_norm)
+
     font = gui_app.font(FontWeight.NORMAL)
     timer.lap("setup")
 
@@ -345,13 +377,84 @@ def clip(route: Route, output: str, start: int, end: int, headless: bool = True,
   logger.info(f"Generated {timer.fmt(duration)}")
 
 
+def stacked_clip(args):
+  pid = os.getpid()
+  tmp_c4 = f"/tmp/_stack_c4_{pid}.mp4"
+  tmp_c3x = f"/tmp/_stack_c3x_{pid}.mp4"
+
+  base = [sys.executable, __file__, args.route,
+          '-s', str(args.start), '-e', str(args.end),
+          '-f', str(args.file_size), '-x', str(args.speed)]
+  if args.data_dir:        base += ['-d', args.data_dir]
+  if args.title:           base += ['-t', args.title]
+  if args.qcam:            base.append('--qcam')
+  if args.no_metadata:     base.append('--no-metadata')
+  if args.no_time_overlay: base.append('--no-time-overlay')
+
+  try:
+    logger.info("Rendering c4 clip...")
+    subprocess.run(base + ['-o', tmp_c4], check=True)
+
+    logger.info("Rendering c3x clip...")
+    subprocess.run(base + ['--big', '-o', tmp_c3x], check=True)
+
+    logger.info("Stacking clips...")
+    subprocess.run([
+      'ffmpeg', '-v', 'warning', '-nostats',
+      '-i', tmp_c3x, '-i', tmp_c4,
+      '-filter_complex', '[0:v]scale=536:-2[top];[top][1:v]vstack=inputs=2[out]',
+      '-map', '[out]',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-y', args.output
+    ], check=True)
+    logger.info(f"Stacked clip saved to: {Path(args.output).resolve()}")
+
+  finally:
+    for f in (tmp_c4, tmp_c3x):
+      if os.path.exists(f):
+        os.remove(f)
+
+
+def find_best_rf_window(route: Route, window_s: int) -> tuple[int, int, float, float]:
+  """Return (start_s, end_s, accel_x, alpha_x) for the best RocketFuel window."""
+  from openpilot.tools.clip.find_rocket_fuel import extract_timeseries, simulate_filters, find_top_windows
+
+  log_paths = [p for p in route.log_paths() if p]
+  if not log_paths:
+    raise RuntimeError("No log paths found for route")
+
+  all_chunks = load_logs_parallel(log_paths)
+  a_ego_series, engaged_series = extract_timeseries(all_chunks)
+  bar_series = simulate_filters(a_ego_series, engaged_series)
+
+  windows = find_top_windows(bar_series, window_s, top_n=1)
+  if not windows:
+    raise RuntimeError("No RocketFuel windows found in route")
+
+  w = windows[0]
+  start_s, end_s = int(w['start_s']), int(w['end_s'])
+  accel_x, alpha_x = bar_series[w['start_frame']]
+  logger.info(f"Best RF window: {start_s}s-{end_s}s  score={w['score']:.1f}  "
+              f"pos={w['pos_motion']:.1f}  neg={w['neg_motion']:.1f}")
+  return start_s, end_s, accel_x, alpha_x
+
+
 def main():
   logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s\t%(message)s")
   args = parse_args()
 
-  setup_env(args.output, big=args.big, speed=args.speed, target_mb=args.file_size, duration=args.end - args.start)
-  clip(Route(args.route, data_dir=args.data_dir), args.output, args.start, args.end, not args.windowed,
-       args.big, args.title, not args.no_metadata, not args.no_time_overlay, args.qcam)
+  rf_state = None
+  if args.best_rf:
+    route = Route(args.route, data_dir=args.data_dir)
+    start_s, end_s, accel_x, alpha_x = find_best_rf_window(route, args.rf_window)
+    args.start, args.end = start_s, end_s
+    rf_state = (accel_x, alpha_x)
+
+  if args.stacked:
+    stacked_clip(args)
+  else:
+    setup_env(args.output, big=args.big, speed=args.speed, target_mb=args.file_size, duration=args.end - args.start)
+    clip(Route(args.route, data_dir=args.data_dir), args.output, args.start, args.end, not args.windowed,
+         args.big, args.title, not args.no_metadata, not args.no_time_overlay, args.qcam, rf_state)
 
 
 if __name__ == "__main__":
