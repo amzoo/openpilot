@@ -99,13 +99,14 @@ for f in glob.glob(repo_op + '/**/*.so',  recursive=True) + \
 "
 
 # Run clip tool: use main repo's venv + PYTHONPATH pointing to the worktree.
-# - PYTHONPATH=$WORKTREE shadows openpilot.* imports with the UI branch's files.
+# - PYTHONPATH=$WORKTREE:$REPO_ROOT — worktree first (UI branch files shadow
+#   main repo), REPO_ROOT explicit (never relies on .pth being present).
 # - Broken submodule symlinks in the worktree (msgq, opendbc, etc.) fail isdir,
-#   so they fall through to REPO_ROOT (via .pth) where .so files are compiled.
+#   so they fall through to REPO_ROOT where msgq has Python files + .so links.
 # - .so symlinks above ensure compiled extensions are found inside the worktree.
 # - cereal symlink above ensures capnp loads schemas from a single physical path.
 echo "Rendering clip to $OUT..."
-PYTHONPATH="$WORKTREE" "$REPO_ROOT/.venv/bin/python3" "$WORKTREE/tools/clip/run.py" "$@" -o "$OUT"
+PYTHONPATH="$WORKTREE:$REPO_ROOT" "$REPO_ROOT/.venv/bin/python3" "$WORKTREE/tools/clip/run.py" "$@" -o "$OUT"
 
 echo "Done: $OUT"
 open "$OUT" 2>/dev/null || echo "(open not available — file at $OUT)"
