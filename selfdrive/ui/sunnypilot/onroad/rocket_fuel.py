@@ -10,6 +10,7 @@ import pyray as rl
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.shader_polygon import draw_rounded_rect
 
 MAX_ACCEL = 4.0
 BAR_HEIGHT = 125.0
@@ -35,35 +36,43 @@ class RocketFuel:
     accel = self._accel_filter.x
     alpha = self._alpha_filter.x
 
-    bar_x = rect.x + np.interp(abs(accel), [0.5, 1], [6 * scale, 8 * scale])
-    bar_w = np.interp(abs(accel), [0.5, 1], [14 * scale, 56 * scale])
+    abs_accel = abs(accel)
+    bar_x = rect.x + np.interp(abs_accel, [0.5, 1], [6 * scale, 8 * scale])
+    bar_w = np.interp(abs_accel, [0.5, 1], [14 * scale, 56 * scale])
     bar_half_h = BAR_HEIGHT * scale / 2
     cy = rect.y + rect.height / 2
 
-    # background track (white translucent, full height * alpha)
-    bg_alpha = np.interp(abs(accel), [0.5, 1.0], [0.25, 0.5])
+    # background track: fades out as foreground bar fills in
+    bg_fade = 1.0 - abs_accel
+    bg_alpha = np.interp(abs_accel, [0.5, 1.0], [0.25, 0.5])
     if ui_state.status in (UIStatus.ENGAGED, UIStatus.LAT_ONLY):
-      bg_color = rl.Color(255, 255, 255, int(255 * bg_alpha * alpha))
+      bg_color = rl.Color(255, 255, 255, int(255 * bg_alpha * bg_fade * alpha))
     else:
-      bg_color = rl.Color(255, 255, 255, int(255 * 0.15 * alpha))
+      bg_color = rl.Color(255, 255, 255, int(255 * 0.15 * bg_fade * alpha))
 
     bg_h = bar_half_h * 2 * alpha
     rl.draw_rectangle_rounded(rl.Rectangle(bar_x, cy - bg_h / 2, bar_w, bg_h), 1.0, 8, bg_color)
 
-    # foreground bar (grows from center toward tip)
-    base_alpha = int(200 * alpha)
-    if accel >= 0:
-      fg_color = rl.Color(0, 245, 0, base_alpha)    # green for acceleration
-    else:
-      fg_color = rl.Color(245, 0, 0, base_alpha)    # red for braking
+    # foreground bar: solid color interpolated white → green/red based on accel magnitude
+    fg_alpha = int(200 * alpha)
     if ui_state.status not in (UIStatus.ENGAGED, UIStatus.LAT_ONLY):
-      fg_color = rl.Color(fg_color.r, fg_color.g, fg_color.b, int(255 * 0.35 * alpha))
+      fg_alpha = int(255 * 0.35 * alpha)
 
-    fg_h = bar_half_h * abs(accel) * alpha
-    fg_y = cy - fg_h if accel >= 0 else cy
-    rl.draw_rectangle_rounded(rl.Rectangle(bar_x, fg_y, bar_w, fg_h), 1.0, 8, fg_color)
+    # foreground bar: 2*scale gap on each side (matches torque bar dot gap)
+    fg_w = bar_w - 4 * scale
+    fg_x = bar_x + 2 * scale
+    # max height: fg top cap concentric with bg top cap; min height: circle (fg_w)
+    fg_h_max = bar_half_h * alpha + fg_w / 2
+    fg_h = float(np.interp(abs_accel, [0, 1], [fg_w, fg_h_max]))
 
-    # center dot when near zero
-    if abs(accel) < 0.5:
-      dot_color = rl.Color(182, 182, 182, int(255 * 0.9 * alpha))
-      rl.draw_circle(int(bar_x + bar_w / 2), int(cy), int(5 * scale), dot_color)
+    fade = int(255 * (1.0 - abs_accel))  # 255 = white, 0 = full color
+    if accel >= 0:
+      fg_color = rl.Color(fade, 245, fade, fg_alpha)
+      fg_y = cy - fg_h + fg_w / 2
+    else:
+      fg_color = rl.Color(245, fade, fade, fg_alpha)
+      fg_y = cy - fg_w / 2
+
+    draw_rounded_rect(rect, rl.Rectangle(fg_x, fg_y, fg_w, fg_h), 1.0, color=fg_color)
+
+
