@@ -10,7 +10,6 @@ import pyray as rl
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app
-from openpilot.system.ui.lib.shader_polygon import draw_rounded_rect
 
 MAX_ACCEL = 4.0
 BAR_HEIGHT = 125.0
@@ -37,7 +36,7 @@ class RocketFuel:
     alpha = self._alpha_filter.x
 
     abs_accel = abs(accel)
-    bar_x = rect.x + np.interp(abs_accel, [0.5, 1], [6 * scale, 8 * scale])
+    bar_x = rect.x + np.interp(abs_accel, [0.5, 1], [20 * scale, 22 * scale])
     bar_w = np.interp(abs_accel, [0.5, 1], [14 * scale, 56 * scale])
     bar_half_h = BAR_HEIGHT * scale / 2
     cy = rect.y + rect.height / 2
@@ -73,6 +72,6 @@ class RocketFuel:
       fg_color = rl.Color(245, fade, fade, fg_alpha)
       fg_y = cy - fg_w / 2
 
-    draw_rounded_rect(rect, rl.Rectangle(fg_x, fg_y, fg_w, fg_h), 1.0, color=fg_color)
+    rl.draw_rectangle_rounded(rl.Rectangle(fg_x, fg_y, fg_w, fg_h), 1.0, 8, fg_color)
 
 
