@@ -42,6 +42,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Ensure the Python venv exists (uv sync is a no-op if already up to date)
+if [[ ! -f "$REPO_ROOT/.venv/bin/python3" ]]; then
+  echo "Setting up Python environment..."
+  (cd "$REPO_ROOT" && uv sync --quiet)
+fi
+
+# Ensure msgq submodule is initialized (provides Python source files)
+if [[ ! -f "$REPO_ROOT/msgq_repo/msgq/__init__.py" ]]; then
+  echo "Initializing msgq submodule..."
+  git -C "$REPO_ROOT" submodule update --init msgq_repo
+fi
+
+# Symlink prebuilt msgq .so files into the submodule if not already built
+for so in ipc_pyx.so visionipc/visionipc_pyx.so; do
+  dst="$REPO_ROOT/msgq_repo/msgq/$so"
+  src="$SCRIPT_DIR/prebuilt/msgq/$so"
+  if [[ ! -f "$dst" ]]; then
+    mkdir -p "$(dirname "$dst")"
+    ln -sf "$src" "$dst"
+  fi
+done
+
 # Create worktree from the UI branch
 echo "Creating worktree for branch '$BRANCH' at $WORKTREE..."
 git -C "$REPO_ROOT" worktree add "$WORKTREE" "$BRANCH"
@@ -58,8 +80,8 @@ rm -rf "$WORKTREE/cereal"
 ln -s "$REPO_ROOT/cereal" "$WORKTREE/cereal"
 
 # Symlink build artifacts from the main repo into the worktree's openpilot
-# package. The worktree has no compiled extensions (scons was not run there)
-# and no generated .fnt font atlases (raylib generates these at build time).
+# package. The .so, .fnt, and .png files are committed to this branch so they
+# exist in REPO_ROOT after a fresh clone — no scons needed.
 # Use Python glob because macOS find doesn't traverse this directory reliably.
 REPO_ROOT="$REPO_ROOT" WORKTREE="$WORKTREE" \
   "$REPO_ROOT/.venv/bin/python3" -c "

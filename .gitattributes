@@ -10,6 +10,9 @@
 *.otf filter=lfs diff=lfs merge=lfs -text
 *.wav filter=lfs diff=lfs merge=lfs -text
 
+# Override: store prebuilt font atlases as regular files (LFS endpoint is GitLab)
+selfdrive/assets/fonts/*.png -filter -diff -merge
+
 selfdrive/car/tests/test_models_segs.txt filter=lfs diff=lfs merge=lfs -text
 system/hardware/tici/updater_weston filter=lfs diff=lfs merge=lfs -text
 system/hardware/tici/updater_magic filter=lfs diff=lfs merge=lfs -text
