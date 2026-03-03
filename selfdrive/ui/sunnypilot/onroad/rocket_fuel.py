@@ -38,15 +38,16 @@ class RocketFuel:
     accel_norm = max(-1.0, min(1.0, sm['carState'].aEgo / MAX_ACCEL))
     self._accel_filter.update(accel_norm)
 
+    active = ui_state.status != UIStatus.DISENGAGED
     engaged = ui_state.status in (UIStatus.ENGAGED, UIStatus.LAT_ONLY)
-    self._alpha_filter.update(engaged)
+    self._alpha_filter.update(active)
 
     accel = self._accel_filter.x
     alpha = self._alpha_filter.x
 
     abs_accel = abs(accel)
     bar_x = rect.x + _lerp(abs_accel, 0.5, 1, 20 * scale, 22 * scale)
-    bar_w = _lerp(abs_accel, 0.5, 1, 14 * scale, 56 * scale)
+    bar_w = _lerp(abs_accel, 0.5, 1, 18 * scale, 60 * scale)
     bar_half_h = BAR_HEIGHT * scale / 2
     cy = rect.y + rect.height / 2
 
@@ -82,4 +83,11 @@ class RocketFuel:
       fg_y = cy - fg_w / 2
 
     rl.draw_rectangle_rounded(rl.Rectangle(fg_x, fg_y, fg_w, fg_h), 1.0, 8, fg_color)
+
+    # center dot: visible at low accel, fades as bar grows (matches torque bar)
+    if abs_accel < 0.5:
+      dot_x = int(bar_x + bar_w / 2)
+      dot_y = int(cy)
+      dot_r = 5 * scale
+      rl.draw_circle(dot_x, dot_y, dot_r, rl.Color(182, 182, 182, int(255 * 0.9 * alpha)))
 
