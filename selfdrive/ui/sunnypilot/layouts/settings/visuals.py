@@ -17,6 +17,12 @@ CHEVRON_INFO_DESCRIPTION = {
   "disabled": tr_noop("This feature requires sunnypilot longitudinal control to be available.")
 }
 
+CHEVRON_STYLE_DESCRIPTION = {
+  "enabled": tr_noop("Select the visual style of the chevron that tracks the lead car. " +
+                     "Only applicable to cars with sunnypilot longitudinal control."),
+  "disabled": tr_noop("This feature requires sunnypilot longitudinal control to be available.")
+}
+
 
 class VisualsLayout(Widget):
   def __init__(self):
@@ -105,6 +111,13 @@ class VisualsLayout(Widget):
       )
       self._toggles[param] = toggle
 
+    self._chevron_style = multiple_button_item_sp(
+      title=lambda: tr("Chevron Style"),
+      description="",
+      buttons=[lambda: tr("Default"), lambda: tr("Filled"), lambda: tr("Open V")],
+      param="ChevronStyle",
+      inline=False
+    )
     self._chevron_info = multiple_button_item_sp(
       title=lambda: tr("Display Metrics Below Chevron"),
       description="",
@@ -122,6 +135,7 @@ class VisualsLayout(Widget):
     )
 
     items = list(self._toggles.values()) + [
+      self._chevron_style,
       self._chevron_info,
       self._dev_ui_info,
     ]
@@ -136,10 +150,16 @@ class VisualsLayout(Widget):
     self._dev_ui_info.action_item.set_selected_button(ui_state.params.get("DevUIInfo", return_default=True))
 
     if ui_state.has_longitudinal_control:
+      self._chevron_style.set_description(tr(CHEVRON_STYLE_DESCRIPTION["enabled"]))
+      self._chevron_style.action_item.set_selected_button(ui_state.params.get("ChevronStyle", return_default=True))
+      self._chevron_style.action_item.set_enabled(True)
       self._chevron_info.set_description(tr(CHEVRON_INFO_DESCRIPTION["enabled"]))
       self._chevron_info.action_item.set_selected_button(ui_state.params.get("ChevronInfo", return_default=True))
       self._chevron_info.action_item.set_enabled(True)
     else:
+      self._chevron_style.set_description(tr(CHEVRON_STYLE_DESCRIPTION["disabled"]))
+      self._chevron_style.action_item.set_enabled(False)
+      ui_state.params.put("ChevronStyle", 0)
       self._chevron_info.set_description(tr(CHEVRON_INFO_DESCRIPTION["disabled"]))
       self._chevron_info.action_item.set_enabled(False)
       ui_state.params.put("ChevronInfo", 0)
@@ -150,5 +170,7 @@ class VisualsLayout(Widget):
   def show_event(self):
     self._scroller.show_event()
     if not ui_state.has_longitudinal_control:
+      self._chevron_style.set_description(tr(CHEVRON_STYLE_DESCRIPTION["disabled"]))
+      self._chevron_style.show_description(True)
       self._chevron_info.set_description(tr(CHEVRON_INFO_DESCRIPTION["disabled"]))
       self._chevron_info.show_description(True)

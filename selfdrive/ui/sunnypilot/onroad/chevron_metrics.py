@@ -45,11 +45,10 @@ class ChevronMetrics:
     d_rel = lead_data.dRel
     v_rel = lead_data.vRel
 
-    if not lead_vehicle.chevron or len(lead_vehicle.chevron) < 2:
+    if not lead_vehicle.chevron:
       return
 
-    chevron_x = lead_vehicle.chevron[1][0]
-    chevron_y = lead_vehicle.chevron[1][1]
+    chevron_x, chevron_y = lead_vehicle.chevron_pos
     sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35
 
     text_lines = self._build_text_lines(d_rel, v_rel, v_ego)
