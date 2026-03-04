@@ -74,7 +74,7 @@ class RocketFuel:
     fg_h_max = bar_half_h * alpha + fg_w / 2
     fg_h = _lerp(abs_accel, 0, 1, fg_w, fg_h_max)
 
-    fade = int(255 * (1.0 - abs_accel))  # 255 = white, 0 = full color
+    fade = int(255 * max(0.0, 1.0 - abs_accel / 0.3))  # white → full color by 0.3
     if accel >= 0:
       fg_color = rl.Color(fade, 245, fade, fg_alpha)
       fg_y = cy - fg_h + fg_w / 2
@@ -85,7 +85,7 @@ class RocketFuel:
     rl.draw_rectangle_rounded(rl.Rectangle(fg_x, fg_y, fg_w, fg_h), 1.0, 8, fg_color)
 
     # center dot: visible at low accel, fades as bar grows (matches torque bar)
-    if abs_accel < 0.5:
+    if abs_accel < 0.8:
       dot_x = int(bar_x + bar_w / 2)
       dot_y = int(cy)
       dot_r = 5 * scale
