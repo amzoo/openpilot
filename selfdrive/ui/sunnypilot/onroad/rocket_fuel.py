@@ -11,7 +11,7 @@ from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app
 
 MAX_ACCEL = 4.0
-BAR_HEIGHT = 125.0
+BAR_HEIGHT = 135.0
 
 
 def _lerp(x: float, x0: float, x1: float, y0: float, y1: float) -> float:
@@ -49,7 +49,8 @@ class RocketFuel:
     bar_x = rect.x + _lerp(abs_accel, 0.5, 1, 20 * scale, 22 * scale)
     bar_w = _lerp(abs_accel, 0.5, 1, 18 * scale, 60 * scale)
     bar_half_h = BAR_HEIGHT * scale / 2
-    cy = rect.y + rect.height / 2
+    # Center between speed limit bottom (rect.y + 255) and face icon top (rect.y + rect.height - 222)
+    cy = rect.y + (rect.height + 33) / 2
 
     # background track: fades out as foreground bar fills in
     bg_fade = 1.0 - abs_accel
