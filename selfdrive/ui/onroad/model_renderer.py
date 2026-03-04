@@ -7,6 +7,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.selfdrive.ui.sunnypilot.onroad.chevron_geometry import LeadVehicle, build_chevron
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
 from openpilot.system.ui.widgets import Widget
@@ -34,13 +35,6 @@ NO_THROTTLE_COLORS = [
 class ModelPoints:
   raw_points: np.ndarray = field(default_factory=lambda: np.empty((0, 3), dtype=np.float32))
   projected_points: np.ndarray = field(default_factory=lambda: np.empty((0, 2), dtype=np.float32))
-
-
-@dataclass
-class LeadVehicle:
-  glow: list[float] = field(default_factory=list)
-  chevron: list[float] = field(default_factory=list)
-  fill_alpha: int = 0
 
 
 class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
@@ -257,13 +251,8 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
     x = np.clip(point[0], 0.0, rect.width - sz / 2)
     y = min(point[1], rect.height - sz * 0.6)
 
-    g_xo = sz / 5
-    g_yo = sz / 10
-
-    glow = [(x + (sz * 1.35) + g_xo, y + sz + g_yo), (x, y - g_yo), (x - (sz * 1.35) - g_xo, y + sz + g_yo)]
-    chevron = [(x + (sz * 1.25), y + sz), (x, y), (x - (sz * 1.25), y + sz)]
-
-    return LeadVehicle(glow=glow, chevron=chevron, fill_alpha=int(fill_alpha))
+    glow, chevron, pos = build_chevron(x, y, sz, sz / 5, sz / 10, ui_state.chevron_style)
+    return LeadVehicle(glow=glow, chevron=chevron, chevron_pos=pos, fill_alpha=int(fill_alpha))
 
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
@@ -319,8 +308,12 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
       if not lead.glow or not lead.chevron:
         continue
 
-      rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
-      rl.draw_triangle_fan(lead.chevron, len(lead.chevron), rl.Color(201, 34, 49, lead.fill_alpha))
+      glow_color = rl.Color(218, 202, 37, 255)
+      chevron_color = rl.Color(201, 34, 49, lead.fill_alpha)
+      for poly in lead.glow:
+        rl.draw_triangle_fan(poly, len(poly), glow_color)
+      for poly in lead.chevron:
+        rl.draw_triangle_fan(poly, len(poly), chevron_color)
 
   @staticmethod
   def _get_path_length_idx(pos_x_array: np.ndarray, path_distance: float) -> int:
