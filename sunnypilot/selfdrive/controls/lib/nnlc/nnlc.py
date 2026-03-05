@@ -15,8 +15,9 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_base import LatControlTorqueExtBase, sign
-from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import MOCK_MODEL_PATH
+from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import MOCK_MODEL_PATH, detect_model_version
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.model import NNTorqueModel
+from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.residual_ff_model import ResidualFFModel
 
 LOW_SPEED_X = [0, 10, 20, 30]
 LOW_SPEED_Y = [12, 3, 1, 0]
@@ -38,10 +39,19 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     self.enabled = self.params.get_bool("NeuralNetworkLateralControl")
     self.has_nn_model = CP_SP.neuralNetworkLateralControl.model.path != MOCK_MODEL_PATH
 
-    # NN model takes current v_ego, lateral_accel, lat accel/jerk error, roll, and past/future/planned data
-    # of lat accel and roll
-    # Past value is computed using previous desired lat accel and observed roll
-    self.model = NNTorqueModel(CP_SP.neuralNetworkLateralControl.model.path)
+    model_path = CP_SP.neuralNetworkLateralControl.model.path
+    self.nnlc_version = detect_model_version(model_path) if self.has_nn_model else 1
+
+    if self.nnlc_version == 2:
+      import json
+      with open(model_path) as f:
+        model_data = json.load(f)
+      self.model_v2_nn = ResidualFFModel(model_data)
+      self.model = None
+      self.was_active = False
+    else:
+      self.model = NNTorqueModel(model_path)
+      self.model_v2_nn = None
 
     self.pitch = FirstOrderFilter(0.0, 0.5, 0.01)
     self.pitch_last = 0.0
@@ -61,6 +71,8 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
 
   @property
   def _nnlc_enabled(self):
+    if self.nnlc_version == 2:
+      return self.enabled and self.model_valid and self.has_nn_model and self.model_v2_nn is not None
     return self.enabled and self.model_valid and self.has_nn_model
 
   def update_limits(self):
@@ -95,6 +107,85 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     if not self._nnlc_enabled:
       return
 
+    if self.nnlc_version == 2:
+      self._update_nnlc_v2(CS, params, calibrated_pose)
+      return
+
+    self._update_nnlc_v1(CS, params, calibrated_pose)
+
+  def _update_nnlc_v2(self, CS, params, calibrated_pose) -> None:
+    """NNLC v2: physics baseline + neural residual feedforward."""
+    # Use standard torque-space error (physics-based, same as non-NNLC path)
+    self.update_feedforward_torque_space(CS)
+
+    # Reset v2 model temporal state on disengage -> engage transition
+    is_active = CS.vEgo > 0.5  # proxy for engaged
+    if is_active and not self.was_active:
+      self.model_v2_nn.reset()
+    self.was_active = is_active
+
+    # Compute roll with pitch adjustment
+    roll = params.roll
+    if calibrated_pose is not None:
+      pitch = self.pitch.update(calibrated_pose.orientation.pitch)
+      roll = roll_pitch_adjust(roll, pitch)
+      self.pitch_last = pitch
+
+    # Get torqued params for the physics baseline inside the model
+    laf = self.lac_torque.torque_params.latAccelFactor
+    friction = self.lac_torque.torque_params.friction
+
+    # Build preview features from model_v2 planner output
+    extra_inputs = None
+    if self.model_v2 is not None and self.model_v2_nn is not None:
+      n_preview = len(self.model_v2_nn.input_features) - 8  # 8 base state features
+      if n_preview > 0:
+        extra_inputs = self._get_preview_features(CS, roll, n_preview)
+
+    # Override feedforward with v2 model prediction
+    self._ff = self.model_v2_nn.predict(
+      lat_accel=self._desired_lateral_accel,
+      v_ego=CS.vEgo,
+      steer_angle=CS.steeringAngleDeg,
+      steer_rate=CS.steeringRateDeg,
+      roll=roll,
+      a_ego=CS.aEgo,
+      lat_accel_factor=laf,
+      friction_coeff=friction,
+      extra_inputs=extra_inputs,
+    )
+
+    self.update_output_torque(CS)
+
+  def _get_preview_features(self, CS, roll, n_preview):
+    """Extract preview features from modelV2 planner output.
+
+    Returns a list of floats for future curvature, roll, and yaw_rate
+    at horizons [0.3, 0.6, 1.0, 1.5]s — matching the training feature order.
+    """
+    adjusted_future_times = [t + 0.5 * CS.aEgo * (t / max(CS.vEgo, 1.0)) for t in self.nn_future_times]
+    v_safe = max(CS.vEgo, 1.0)
+
+    # Future curvature: lat_accel / v^2
+    future_lat_accels = [float(np.interp(t, ModelConstants.T_IDXS, self.model_v2.acceleration.y))
+                         for t in adjusted_future_times]
+    future_curvatures = [la / (v_safe ** 2) for la in future_lat_accels]
+
+    # Future roll: from orientation prediction
+    future_rolls = [float(roll_pitch_adjust(
+                      np.interp(t, ModelConstants.T_IDXS, self.model_v2.orientation.x) + roll,
+                      np.interp(t, ModelConstants.T_IDXS, self.model_v2.orientation.y) + self.pitch_last))
+                    for t in adjusted_future_times]
+
+    # Future yaw_rate: curvature * v_ego (kinematic approximation)
+    future_yaw_rates = [k * v_safe for k in future_curvatures]
+
+    # Order must match training: [curvature_0p3, 0p6, 1p0, 1p5, roll_0p3, ..., yaw_rate_0p3, ...]
+    features = future_curvatures + future_rolls + future_yaw_rates
+    return features[:n_preview]
+
+  def _update_nnlc_v1(self, CS, params, calibrated_pose) -> None:
+    """Original NNLC v1 feedforward path — completely unchanged."""
     self.update_feedforward_torque_space(CS)
 
     low_speed_factor = float(np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y)) ** 2
