@@ -201,6 +201,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"NeuralNetworkLateralControl", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"NNLCModelName", {PERSISTENT | BACKUP, STRING}},
     {"NNLCResidualClamp", {PERSISTENT | BACKUP, FLOAT, "0.00"}},
+    {"NNLCSATShift", {PERSISTENT | BACKUP, FLOAT, "0.00"}},
 
     // sunnylink params
     {"EnableSunnylinkUploader", {PERSISTENT | BACKUP, BOOL}},

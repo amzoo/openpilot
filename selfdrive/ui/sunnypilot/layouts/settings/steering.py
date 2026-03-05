@@ -117,7 +117,19 @@ class SteeringLayout(Widget):
                               "Increase gradually during test drives."),
       min_value=0,
       max_value=30,
-      value_change_step=1,
+      value_change_step=5,
+      label_callback=(lambda x: f"{x/100:.2f}"),
+      use_float_scaling=True,
+    )
+    self._nnlc_sat_shift = option_item_sp(
+      title=lambda: tr("NNLC SAT Window Shift"),
+      param="NNLCSATShift",
+      description=lambda: tr("Shifts the torque authority window toward the estimated Self-Aligning Torque. "
+                              "0.00 = disabled (centered on zero). "
+                              "Improves curve-holding authority. Increase gradually."),
+      min_value=0,
+      max_value=40,
+      value_change_step=5,
       label_callback=(lambda x: f"{x/100:.2f}"),
       use_float_scaling=True,
     )
@@ -138,6 +150,7 @@ class SteeringLayout(Widget):
       self._nnlc_toggle,
       self._nnlc_model_selector,
       self._nnlc_residual_clamp,
+      self._nnlc_sat_shift,
     ]
     return items
 
@@ -176,6 +189,7 @@ class SteeringLayout(Widget):
     self._nnlc_model_selector.action_item.set_enabled(ui_state.is_offroad())
     self._nnlc_model_selector.action_item.set_value(self._get_nnlc_model_label())
     self._nnlc_residual_clamp.set_visible(nnlc_enabled)
+    self._nnlc_sat_shift.set_visible(nnlc_enabled)
 
   def _get_nnlc_model_label(self):
     name = ui_state.params.get("NNLCModelName")

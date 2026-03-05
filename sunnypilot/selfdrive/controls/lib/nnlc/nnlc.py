@@ -18,6 +18,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_base impo
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import MOCK_MODEL_PATH, detect_model_version
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.model import NNTorqueModel
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.residual_ff_model import ResidualFFModel
+from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.sat_window import SATCenteredWindow
 
 LOW_SPEED_X = [0, 10, 20, 30]
 LOW_SPEED_Y = [12, 3, 1, 0]
@@ -49,8 +50,10 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
       self.model_v2_nn = ResidualFFModel(model_data)
       self.model = None
       self.was_active = False
+      self.sat_window = SATCenteredWindow(max_sat_shift=0.0)
       self._param_frame = 0
       self._read_residual_clamp_param()
+      self._read_sat_shift_param()
     else:
       self.model = NNTorqueModel(model_path)
       self.model_v2_nn = None
@@ -77,6 +80,13 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
       self.model_v2_nn.residual_clamp = max(0.0, min(float(val), 0.30))
     except (TypeError, ValueError):
       self.model_v2_nn.residual_clamp = 0.0
+
+  def _read_sat_shift_param(self):
+    val = self.params.get("NNLCSATShift")
+    try:
+      self.sat_window.set_max_shift(float(val))
+    except (TypeError, ValueError):
+      self.sat_window.set_max_shift(0.0)
 
   @property
   def _nnlc_enabled(self):
@@ -128,6 +138,7 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     self._param_frame += 1
     if self._param_frame % 100 == 0:
       self._read_residual_clamp_param()
+      self._read_sat_shift_param()
 
     # Use standard torque-space error (physics-based, same as non-NNLC path)
     self.update_feedforward_torque_space(CS)
@@ -136,6 +147,7 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     is_active = CS.vEgo > 0.5  # proxy for engaged
     if is_active and not self.was_active:
       self.model_v2_nn.reset()
+      self.sat_window.reset()
     self.was_active = is_active
 
     # Compute roll with pitch adjustment
@@ -170,6 +182,12 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     )
 
     self.update_output_torque(CS)
+
+    # Apply SAT window centering after output torque computation
+    if self.sat_window.enabled:
+      lat_accel_corrected = self._desired_lateral_accel - 9.81 * np.sin(roll)
+      sat_estimate = laf * lat_accel_corrected
+      self._output_torque = self.sat_window.apply(self._output_torque, sat_estimate)
 
   def _get_preview_features(self, CS, roll, n_preview):
     """Extract preview features from modelV2 planner output.
