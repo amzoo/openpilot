@@ -49,6 +49,8 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
       self.model_v2_nn = ResidualFFModel(model_data)
       self.model = None
       self.was_active = False
+      self._param_frame = 0
+      self._read_residual_clamp_param()
     else:
       self.model = NNTorqueModel(model_path)
       self.model_v2_nn = None
@@ -68,6 +70,13 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     self.roll_deque = deque(maxlen=history_check_frames[0])
     self.error_deque = deque(maxlen=history_check_frames[0])
     self.past_future_len = len(self.past_times) + len(self.nn_future_times)
+
+  def _read_residual_clamp_param(self):
+    val = self.params.get("NNLCResidualClamp")
+    try:
+      self.model_v2_nn.residual_clamp = max(0.0, min(float(val), 0.30))
+    except (TypeError, ValueError):
+      self.model_v2_nn.residual_clamp = 0.0
 
   @property
   def _nnlc_enabled(self):
@@ -115,6 +124,11 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
 
   def _update_nnlc_v2(self, CS, params, calibrated_pose) -> None:
     """NNLC v2: physics baseline + neural residual feedforward."""
+    # Poll residual_clamp param every ~1s (100 frames at 100Hz)
+    self._param_frame += 1
+    if self._param_frame % 100 == 0:
+      self._read_residual_clamp_param()
+
     # Use standard torque-space error (physics-based, same as non-NNLC path)
     self.update_feedforward_torque_space(CS)
 
