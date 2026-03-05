@@ -4,6 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import json
 import os
 import tomllib
 from difflib import SequenceMatcher
@@ -66,3 +67,13 @@ def get_nn_model_path(CP: structs.CarParams) -> tuple[str, str, bool]:
   model_name = os.path.splitext(os.path.basename(model_path))[0]
 
   return model_path, model_name, exact_match
+
+
+def detect_model_version(model_path: str) -> int:
+  """Peek at a model JSON to determine its version (1 or 2)."""
+  try:
+    with open(model_path) as f:
+      data = json.load(f)
+    return int(data.get("version", 1))
+  except Exception:
+    return 1
