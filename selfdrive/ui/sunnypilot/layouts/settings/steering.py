@@ -4,14 +4,20 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import os
+
 from cereal import car
 from enum import IntEnum
 
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
-from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, simple_button_item_sp, option_item_sp, LineSeparatorSP
+from openpilot.system.ui.sunnypilot.lib.utils import NoElideButtonAction
+from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, toggle_item_sp, simple_button_item_sp, option_item_sp, LineSeparatorSP
+from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeOptionDialog, TreeFolder, TreeNode
+from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.scroller_tici import Scroller
-from openpilot.system.ui.widgets import Widget
+from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import TORQUE_NN_MODEL_PATH
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.lane_change_settings import LaneChangeSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.mads_settings import MadsSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.torque_settings import TorqueSettingsLayout
@@ -96,6 +102,13 @@ class SteeringLayout(Widget):
       title=lambda: tr("Neural Network Lateral Control (NNLC)"),
       description=""
     )
+    self._nnlc_model_dialog: TreeOptionDialog | None = None
+    self._nnlc_model_selector = ListItemSP(
+      title=tr("NNLC Model"),
+      description=tr("Select which NNLC model to use. Requires reboot to take effect."),
+      action_item=NoElideButtonAction(tr("SELECT")),
+      callback=self._show_nnlc_model_dialog,
+    )
     self._nnlc_residual_clamp = option_item_sp(
       title=lambda: tr("NNLC Residual Authority"),
       param="NNLCResidualClamp",
@@ -123,6 +136,7 @@ class SteeringLayout(Widget):
       self._torque_customization_button,
       LineSeparatorSP(40),
       self._nnlc_toggle,
+      self._nnlc_model_selector,
       self._nnlc_residual_clamp,
     ]
     return items
@@ -158,7 +172,57 @@ class SteeringLayout(Widget):
     self._nnlc_toggle.action_item.set_enabled(ui_state.is_offroad() and torque_allowed and not enforce_torque_enabled)
     self._torque_control_toggle.action_item.set_enabled(ui_state.is_offroad() and torque_allowed and not nnlc_enabled)
     self._torque_customization_button.action_item.set_enabled(self._torque_control_toggle.action_item.get_state())
+    self._nnlc_model_selector.set_visible(nnlc_enabled)
+    self._nnlc_model_selector.action_item.set_enabled(ui_state.is_offroad())
+    self._nnlc_model_selector.action_item.set_value(self._get_nnlc_model_label())
     self._nnlc_residual_clamp.set_visible(nnlc_enabled)
+
+  def _get_nnlc_model_label(self):
+    name = ui_state.params.get("NNLCModelName")
+    if name is not None:
+      name = name.strip()
+      if name:
+        return name
+    return tr("Default")
+
+  def _get_nnlc_car_fingerprint(self):
+    if ui_state.CP is not None:
+      return ui_state.CP.carFingerprint
+    return ""
+
+  def _show_nnlc_model_dialog(self):
+    fingerprint = self._get_nnlc_car_fingerprint()
+    models = []
+    for f in os.listdir(TORQUE_NN_MODEL_PATH):
+      if f.endswith(".json") and f != "MOCK.json":
+        name = os.path.splitext(f)[0]
+        if fingerprint and fingerprint in name:
+          models.append(name)
+
+    nodes = [TreeNode(tr("Default"))]
+    for name in sorted(models):
+      nodes.append(TreeNode(name))
+
+    folders = [TreeFolder("", nodes)]
+    current_label = self._get_nnlc_model_label()
+
+    def handle_selection(result: int):
+      if result == DialogResult.CONFIRM and self._nnlc_model_dialog:
+        selected = self._nnlc_model_dialog.selection_ref
+        if selected == tr("Default"):
+          ui_state.params.remove("NNLCModelName")
+        else:
+          ui_state.params.put("NNLCModelName", selected)
+      self._nnlc_model_dialog = None
+
+    self._nnlc_model_dialog = TreeOptionDialog(
+      tr("Select NNLC Model"),
+      folders,
+      current_ref=current_label,
+      option_font_weight=FontWeight.UNIFONT,
+      on_exit=handle_selection,
+    )
+    gui_app.push_widget(self._nnlc_model_dialog)
 
   def _render(self, rect):
     if self._current_panel == PanelType.LANE_CHANGE:
