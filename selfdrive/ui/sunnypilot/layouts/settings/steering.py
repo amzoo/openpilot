@@ -96,6 +96,18 @@ class SteeringLayout(Widget):
       title=lambda: tr("Neural Network Lateral Control (NNLC)"),
       description=""
     )
+    self._nnlc_residual_clamp = option_item_sp(
+      title=lambda: tr("NNLC Residual Authority"),
+      param="NNLCResidualClamp",
+      description=lambda: tr("Controls how much the neural network can adjust the steering feedforward. "
+                              "0.00 = neural corrections disabled (physics-only baseline). "
+                              "Increase gradually during test drives."),
+      min_value=0,
+      max_value=30,
+      value_change_step=1,
+      label_callback=(lambda x: f"{x/100:.2f}"),
+      use_float_scaling=True,
+    )
 
     items = [
       self._mads_toggle,
@@ -111,6 +123,7 @@ class SteeringLayout(Widget):
       self._torque_customization_button,
       LineSeparatorSP(40),
       self._nnlc_toggle,
+      self._nnlc_residual_clamp,
     ]
     return items
 
@@ -145,6 +158,7 @@ class SteeringLayout(Widget):
     self._nnlc_toggle.action_item.set_enabled(ui_state.is_offroad() and torque_allowed and not enforce_torque_enabled)
     self._torque_control_toggle.action_item.set_enabled(ui_state.is_offroad() and torque_allowed and not nnlc_enabled)
     self._torque_customization_button.action_item.set_enabled(self._torque_control_toggle.action_item.get_state())
+    self._nnlc_residual_clamp.set_visible(nnlc_enabled)
 
   def _render(self, rect):
     if self._current_panel == PanelType.LANE_CHANGE:
