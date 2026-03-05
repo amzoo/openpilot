@@ -69,6 +69,17 @@ def get_nn_model_path(CP: structs.CarParams) -> tuple[str, str, bool]:
   return model_path, model_name, exact_match
 
 
+def list_nn_models_for_car(car_fingerprint: str) -> list[str]:
+  """Return sorted list of model filenames matching the car fingerprint."""
+  models = []
+  for f in os.listdir(TORQUE_NN_MODEL_PATH):
+    if f.endswith(".json") and f != "MOCK.json":
+      name = os.path.splitext(f)[0]
+      if car_fingerprint in name:
+        models.append(name)
+  return sorted(models)
+
+
 def detect_model_version(model_path: str) -> int:
   """Peek at a model JSON to determine its version (1 or 2)."""
   try:
