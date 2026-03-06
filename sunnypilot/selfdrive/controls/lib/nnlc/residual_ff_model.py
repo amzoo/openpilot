@@ -69,10 +69,10 @@ class ResidualFFModel:
 
     if any(not np.isfinite(x) for x in inputs_raw):
       lat_safe = lat_accel - 9.81 * np.sin(roll) if np.isfinite(lat_accel) and np.isfinite(roll) else 0.0
-      return float(laf * lat_safe + fric * np.sign(lat_safe))
+      return float(lat_safe / laf + fric * np.sign(lat_safe))
 
     lat_accel_corrected = lat_accel - 9.81 * np.sin(roll)
-    baseline = laf * lat_accel_corrected + fric * float(np.sign(lat_accel_corrected))
+    baseline = lat_accel_corrected / laf + fric * float(np.sign(lat_accel_corrected))
 
     base_x = [
       lat_accel_corrected, v_ego, steer_angle, steer_rate,
