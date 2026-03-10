@@ -15,6 +15,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_base import LatControlTorqueExtBase, sign
+from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.direct_torque_model import DirectTorqueModel
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import MOCK_MODEL_PATH, detect_model_version
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.model import NNTorqueModel
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.residual_ff_model import ResidualFFModel
@@ -48,15 +49,26 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
       with open(model_path) as f:
         model_data = json.load(f)
       self.model_v2_nn = ResidualFFModel(model_data)
+      self.model_v3_nn = None
       self.model = None
       self.was_active = False
       self.sat_window = SATCenteredWindow(max_sat_shift=0.0)
       self._param_frame = 0
       self._read_residual_clamp_param()
       self._read_sat_shift_param()
+    elif self.nnlc_version == 3:
+      import json
+      with open(model_path) as f:
+        model_data = json.load(f)
+      self.model_v3_nn = DirectTorqueModel(model_data)
+      self.model_v2_nn = None
+      self.model = None
+      self.was_active = False
+      self._param_frame = 0
     else:
       self.model = NNTorqueModel(model_path)
       self.model_v2_nn = None
+      self.model_v3_nn = None
 
     self.pitch = FirstOrderFilter(0.0, 0.5, 0.01)
     self.pitch_last = 0.0
@@ -92,6 +104,8 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
   def _nnlc_enabled(self):
     if self.nnlc_version == 2:
       return self.enabled and self.model_valid and self.has_nn_model and self.model_v2_nn is not None
+    if self.nnlc_version == 3:
+      return self.enabled and self.model_valid and self.has_nn_model and self.model_v3_nn is not None
     return self.enabled and self.model_valid and self.has_nn_model
 
   def update_limits(self):
@@ -128,6 +142,10 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
 
     if self.nnlc_version == 2:
       self._update_nnlc_v2(CS, params, calibrated_pose)
+      return
+
+    if self.nnlc_version == 3:
+      self._update_nnlc_v3(CS, params, calibrated_pose)
       return
 
     self._update_nnlc_v1(CS, params, calibrated_pose)
@@ -188,6 +206,52 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
       lat_accel_corrected = self._desired_lateral_accel - 9.81 * np.sin(roll)
       sat_estimate = laf * lat_accel_corrected
       self._output_torque = self.sat_window.apply(self._output_torque, sat_estimate)
+
+  def _update_nnlc_v3(self, CS, params, calibrated_pose) -> None:
+    """NNLC v3: direct torque with FiLM conditioning + preview features."""
+    # Use standard torque-space error (physics-based, same as non-NNLC path)
+    self.update_feedforward_torque_space(CS)
+
+    # Reset v3 model temporal state on disengage -> engage transition
+    is_active = CS.vEgo > 0.5  # proxy for engaged
+    if is_active and not self.was_active:
+      self.model_v3_nn.reset()
+    self.was_active = is_active
+
+    # Compute roll with pitch adjustment
+    roll = params.roll
+    if calibrated_pose is not None:
+      pitch = self.pitch.update(calibrated_pose.orientation.pitch)
+      roll = roll_pitch_adjust(roll, pitch)
+      self.pitch_last = pitch
+
+    # Get torqued params
+    laf = self.lac_torque.torque_params.latAccelFactor
+    friction = self.lac_torque.torque_params.friction
+
+    # yaw_rate: livePose.angularVelocityDevice.z is positive=left (right-hand rule, Z-up).
+    # Training data was sign-corrected to positive=right. Negate.
+    yaw_rate = -calibrated_pose.angular_velocity.z if calibrated_pose is not None else 0.0
+
+    # Preview features: 12 values matching training feature order
+    preview_features = self._get_preview_features(CS, roll, 12) if self.model_v2 is not None else [0.0] * 12
+
+    # desired_lat_accel: planner is positive=left, model expects positive=right. Negate.
+    self._ff = self.model_v3_nn.predict(
+      desired_lat_accel   = -self._desired_lateral_accel,
+      v_ego               = CS.vEgo,
+      steer_angle_deg     = CS.steeringAngleDeg,
+      steer_rate_deg      = CS.steeringRateDeg,
+      roll                = roll,
+      a_ego               = CS.aEgo,
+      lat_accel_corrected = self._actual_lateral_accel,
+      yaw_rate            = yaw_rate,
+      preview_features    = preview_features,
+      lat_accel_factor    = laf,
+      friction_coeff      = friction,
+    )
+
+    self.update_output_torque(CS)
 
   def _get_preview_features(self, CS, roll, n_preview):
     """Extract preview features from modelV2 planner output.
