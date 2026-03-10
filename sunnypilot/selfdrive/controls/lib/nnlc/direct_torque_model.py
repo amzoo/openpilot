@@ -111,12 +111,12 @@ class DirectTorqueModel:
 
     torque = self._forward(state, preview, cond)
 
-    # Speed gate: v²/(v²+ε²)
-    if self.speed_gate_eps > 0:
-      v_sq = v_ego * v_ego
-      torque *= v_sq / (v_sq + self.speed_gate_eps ** 2)
-    else:
-      torque *= min(1.0, v_ego / 5.0)
+    # Fixed linear speed ramp: torque → 0 as v → 0, full at v ≥ 5 m/s.
+    # The learned speed_gate_eps collapsed to 0.160 in v3.5 training
+    # (gate ≈ 0.997 at v=3 m/s — effectively disabled). The linear ramp
+    # provides the correct physics-motivated attenuation without relying
+    # on the learned gate value.
+    torque *= min(1.0, v_ego / 5.0)
 
     return torque
 
