@@ -13,6 +13,7 @@ from opendbc.sunnypilot.car.interfaces import LatControlInputs
 from opendbc.sunnypilot.car.lateral_ext import get_friction as get_friction_in_torque_space
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_base import LatControlTorqueExtBase, sign
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.direct_torque_model import DirectTorqueModel
@@ -44,6 +45,9 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     model_path = CP_SP.neuralNetworkLateralControl.model.path
     self.nnlc_version = detect_model_version(model_path) if self.has_nn_model else 1
 
+    self._residual_clamp = 0.0
+    self._sat_shift = 0.0
+
     if self.nnlc_version == 2:
       import json
       with open(model_path) as f:
@@ -70,6 +74,11 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
       self.model_v2_nn = None
       self.model_v3_nn = None
 
+    cloudlog.info(
+      f"NNLC: loaded v{self.nnlc_version} model from {model_path!r}, "
+      f"residual_clamp={self._residual_clamp:.3f}, sat_shift={self._sat_shift:.3f}"
+    )
+
     self.pitch = FirstOrderFilter(0.0, 0.5, 0.01)
     self.pitch_last = 0.0
 
@@ -89,16 +98,26 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
   def _read_residual_clamp_param(self):
     val = self.params.get("NNLCResidualClamp")
     try:
-      self.model_v2_nn.residual_clamp = max(0.0, min(float(val), 0.30))
+      new_clamp = max(0.0, min(float(val), 0.30))
     except (TypeError, ValueError):
-      self.model_v2_nn.residual_clamp = 0.0
+      new_clamp = 0.0
+
+    self.model_v2_nn.residual_clamp = new_clamp
+    if abs(new_clamp - self._residual_clamp) > 1e-4:
+      cloudlog.info(f"NNLC: residual_clamp changed {self._residual_clamp:.3f} -> {new_clamp:.3f}")
+    self._residual_clamp = new_clamp
 
   def _read_sat_shift_param(self):
     val = self.params.get("NNLCSATShift")
     try:
-      self.sat_window.set_max_shift(float(val))
+      new_shift = float(val)
     except (TypeError, ValueError):
-      self.sat_window.set_max_shift(0.0)
+      new_shift = 0.0
+
+    self.sat_window.set_max_shift(new_shift)
+    if abs(new_shift - self._sat_shift) > 1e-4:
+      cloudlog.info(f"NNLC: sat_shift changed {self._sat_shift:.3f} -> {new_shift:.3f}")
+    self._sat_shift = new_shift
 
   @property
   def _nnlc_enabled(self):
@@ -107,6 +126,16 @@ class NeuralNetworkLateralControl(LatControlTorqueExtBase):
     if self.nnlc_version == 3:
       return self.enabled and self.model_valid and self.has_nn_model and self.model_v3_nn is not None
     return self.enabled and self.model_valid and self.has_nn_model
+
+  @property
+  def log_state(self) -> dict:
+    """Return current NNLC parameters for inclusion in pid_log."""
+    return {
+      "residual_clamp": self._residual_clamp,
+      "sat_shift": getattr(self.sat_window, 'max_sat_shift', 0.0) if hasattr(self, 'sat_window') else 0.0,
+      "feedforward": self._ff,
+      "model_version": self.nnlc_version if self._nnlc_enabled else 0,
+    }
 
   def update_limits(self):
     if not self._nnlc_enabled:

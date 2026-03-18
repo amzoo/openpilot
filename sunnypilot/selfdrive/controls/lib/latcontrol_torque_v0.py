@@ -124,5 +124,12 @@ class LatControlTorque(LatControl):
       pid_log.desiredLateralJerk = float(desired_lateral_jerk)
       pid_log.saturated = bool(self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited_by_safety, curvature_limited))
 
+      if hasattr(self.extension, 'log_state'):
+        state = self.extension.log_state
+        pid_log.nnlcResidualClamp = float(state["residual_clamp"])
+        pid_log.nnlcSatShift = float(state["sat_shift"])
+        pid_log.nnlcFeedforward = float(state["feedforward"])
+        pid_log.nnlcModelVersion = int(state["model_version"])
+
     # TODO left is positive in this convention
     return -output_torque, 0.0, pid_log
