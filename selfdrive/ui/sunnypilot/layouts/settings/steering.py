@@ -236,7 +236,7 @@ class SteeringLayout(Widget):
       option_font_weight=FontWeight.UNIFONT,
       on_exit=handle_selection,
     )
-    gui_app.set_modal_overlay(self._nnlc_model_dialog, callback=handle_selection)
+    gui_app.push_widget(self._nnlc_model_dialog)
 
   def _render(self, rect):
     if self._current_panel == PanelType.LANE_CHANGE:
