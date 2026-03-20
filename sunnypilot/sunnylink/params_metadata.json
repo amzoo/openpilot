@@ -1296,6 +1296,10 @@
     "title": "Toyota: Enforce Factory Longitudinal Control",
     "description": "When enabled, sunnypilot will not take over control of gas and brakes. Factory Toyota longitudinal control will be used."
   },
+  "TSS2-Smooth": {
+    "title": "Toyota: TSS2 Smooth Longitudinal (Alpha)",
+    "description": "Enable smoother longitudinal control for TSS2 vehicles. Uses a custom speed-dependent integral gain curve and a lower stopping decel rate for gentler stops and smoother traffic driving."
+  },
   "TrainingVersion": {
     "title": "Training Version",
     "description": ""

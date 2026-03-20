@@ -13,9 +13,16 @@ from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp
 
 
+ONROAD_ONLY_DESCRIPTION = tr_noop("Start the vehicle to check vehicle compatibility.")
+TSS2_SMOOTH_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control must be available and enabled for your vehicle to use this feature.")
+
 DESCRIPTIONS = {
   'enforce_stock_longitudinal': tr_noop(
     'sunnypilot will not take over control of gas and brakes. Factory Toyota longitudinal control will be used.'
+  ),
+  'tss2_smooth': tr_noop(
+    'Enable smoother longitudinal control for TSS2 vehicles. ' +
+    'Uses a custom speed-dependent integral gain curve and a lower stopping decel rate for gentler stops and smoother traffic driving.'
   ),
 }
 
@@ -32,7 +39,18 @@ class ToyotaSettings(BrandSettings):
       enabled=lambda: not ui_state.engaged,
     )
 
-    self.items = [self.enforce_stock_longitudinal, ]
+    self.tss2_smooth = toggle_item_sp(
+      lambda: tr("TSS2 Smooth Longitudinal (Alpha)"),
+      description=lambda: tr(DESCRIPTIONS["tss2_smooth"]),
+      initial_state=ui_state.params.get_bool("TSS2-Smooth"),
+      callback=self._on_enable_tss2_smooth,
+      enabled=lambda: not ui_state.engaged,
+    )
+
+    self.items = [
+      self.enforce_stock_longitudinal,
+      self.tss2_smooth,
+    ]
 
   def _on_enable_enforce_stock_longitudinal(self, state: bool):
     if state:
@@ -41,6 +59,8 @@ class ToyotaSettings(BrandSettings):
           ui_state.params.put_bool("ToyotaEnforceStockLongitudinal", True)
           if ui_state.params.get_bool("AlphaLongitudinalEnabled"):
             ui_state.params.put_bool("AlphaLongitudinalEnabled", False)
+          ui_state.params.put_bool("TSS2-Smooth", False)
+          self.tss2_smooth.action_item.set_state(False)
           ui_state.params.put_bool("OnroadCycleRequested", True)
         else:
           self.enforce_stock_longitudinal.action_item.set_state(False)
@@ -55,5 +75,47 @@ class ToyotaSettings(BrandSettings):
       ui_state.params.put_bool("ToyotaEnforceStockLongitudinal", False)
       ui_state.params.put_bool("OnroadCycleRequested", True)
 
+  def _on_enable_tss2_smooth(self, state: bool):
+    if state:
+      def confirm_callback(result: int):
+        if result == DialogResult.CONFIRM:
+          ui_state.params.put_bool("TSS2-Smooth", True)
+          ui_state.params.put_bool("OnroadCycleRequested", True)
+        else:
+          self.tss2_smooth.action_item.set_state(False)
+
+      content = (f"<h1>{self.tss2_smooth.title}</h1><br>" +
+                 f"<p>{self.tss2_smooth.description}</p>")
+
+      dlg = ConfirmDialog(content, tr("Enable"), rich=True, callback=confirm_callback)
+      gui_app.push_widget(dlg)
+
+    else:
+      ui_state.params.put_bool("TSS2-Smooth", False)
+      ui_state.params.put_bool("OnroadCycleRequested", True)
+
   def update_settings(self):
-    pass
+    if ui_state.CP is not None:
+      longitudinal = ui_state.CP.openpilotLongitudinalControl
+      enforce_stock = self.enforce_stock_longitudinal.action_item.get_state()
+
+      if longitudinal and not enforce_stock:
+        self.tss2_smooth.action_item.set_enabled(not ui_state.engaged)
+        new_desc = tr(DESCRIPTIONS["tss2_smooth"])
+        show_desc = False
+      else:
+        self.tss2_smooth.action_item.set_enabled(False)
+        self.tss2_smooth.action_item.set_state(False)
+        new_desc = "<b>" + tr(TSS2_SMOOTH_UNAVAILABLE) + "</b>\n\n" + tr(DESCRIPTIONS["tss2_smooth"])
+        show_desc = True
+
+      if self.tss2_smooth.description != new_desc:
+        self.tss2_smooth.set_description(new_desc)
+        if show_desc:
+          self.tss2_smooth.show_description(True)
+    else:
+      self.tss2_smooth.action_item.set_enabled(False)
+      new_desc = "<b>" + tr(ONROAD_ONLY_DESCRIPTION) + "</b>\n\n" + tr(DESCRIPTIONS["tss2_smooth"])
+      if self.tss2_smooth.description != new_desc:
+        self.tss2_smooth.set_description(new_desc)
+        self.tss2_smooth.show_description(True)
