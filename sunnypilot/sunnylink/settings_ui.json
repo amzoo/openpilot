@@ -1017,6 +1017,46 @@
                   ]
                 }
               ]
+            },
+            {
+              "key": "SmartLongitudinalAnticipation",
+              "widget": "toggle",
+              "title": "Anticipatory Coasting",
+              "description": "When the lead vehicle starts slowing down at a wide gap, ease off early and coast gently into the new traffic speed instead of accelerating and then braking hard.",
+              "visibility": [
+                {
+                  "type": "any",
+                  "conditions": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ]
+                }
+              ],
+              "enablement": [
+                {
+                  "type": "any",
+                  "conditions": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }

@@ -50,9 +50,10 @@ class LongitudinalPlannerSP:
 
     long_enabled = sm['carControl'].enabled
     long_override = sm['carControl'].cruiseControl.override
+    personality = sm['selfdriveState'].personality
 
     # Smart Cruise Control
-    self.scc.update(sm, long_enabled, long_override, v_ego, a_ego, v_cruise)
+    self.scc.update(sm, long_enabled, long_override, v_ego, a_ego, v_cruise, personality)
 
     # Speed Limit Resolver
     self.resolver.update(v_ego, sm)
@@ -67,6 +68,7 @@ class LongitudinalPlannerSP:
       LongitudinalPlanSource.sccVision: (self.scc.vision.output_v_target, self.scc.vision.output_a_target),
       LongitudinalPlanSource.sccMap: (self.scc.map.output_v_target, self.scc.map.output_a_target),
       LongitudinalPlanSource.speedLimitAssist: (self.sla.output_v_target, self.sla.output_a_target),
+      LongitudinalPlanSource.leadPredictive: (self.scc.lead_predictive.output_v_target, self.scc.lead_predictive.output_a_target),
     }
 
     self.source = min(targets, key=lambda k: targets[k][0])
@@ -113,6 +115,15 @@ class LongitudinalPlannerSP:
     sccMap.aTarget = float(self.scc.map.output_a_target)
     sccMap.enabled = self.scc.map.is_enabled
     sccMap.active = self.scc.map.is_active
+    # Lead Predictive Control (anticipatory coasting)
+    leadPredictive = smartCruiseControl.leadPredictive
+    leadPredictive.state = self.scc.lead_predictive.state
+    leadPredictive.vTarget = float(self.scc.lead_predictive.output_v_target)
+    leadPredictive.aTarget = float(self.scc.lead_predictive.output_a_target)
+    leadPredictive.enabled = self.scc.lead_predictive.is_enabled
+    leadPredictive.active = self.scc.lead_predictive.is_active
+    leadPredictive.leadDecel = float(self.scc.lead_predictive.lead_decel)
+    leadPredictive.vLeadFuture = float(self.scc.lead_predictive.v_lead_future)
 
     # Speed Limit
     speedLimit = longitudinalPlanSP.speedLimit

@@ -209,6 +209,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   struct SmartCruiseControl {
     vision @0 :Vision;
     map @1 :Map;
+    leadPredictive @2 :LeadPredictive;
 
     struct Vision {
       state @0 :VisionState;
@@ -228,6 +229,16 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       active @4 :Bool;
     }
 
+    struct LeadPredictive {
+      state @0 :LeadPredictiveState;
+      vTarget @1 :Float32;
+      aTarget @2 :Float32;
+      enabled @3 :Bool;
+      active @4 :Bool;
+      leadDecel @5 :Float32; # aLeadK used for the decision, for debugging
+      vLeadFuture @6 :Float32; # predicted lead flow speed
+    }
+
     enum VisionState {
       disabled @0; # System disabled or inactive.
       enabled @1; # No predicted substantial turn on vision range.
@@ -241,6 +252,13 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       disabled @0; # System disabled or inactive.
       enabled @1; # No predicted substantial turn on map range.
       turning @2; # Actively turning. Managing acceleration to provide a roll on turn feeling.
+      overriding @3; # System overriding with manual control.
+    }
+
+    enum LeadPredictiveState {
+      disabled @0; # System disabled or inactive.
+      enabled @1; # Monitoring the lead, no anticipatory coasting needed.
+      coasting @2; # A decelerating lead is anticipated; lowering the speed target to coast early.
       overriding @3; # System overriding with manual control.
     }
   }
@@ -290,6 +308,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     sccVision @1;
     sccMap @2;
     speedLimitAssist @3;
+    leadPredictive @4;
   }
 
   struct E2eAlerts {
